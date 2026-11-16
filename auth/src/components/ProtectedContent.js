@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { auth } from "../firebaseConfig";
 import { useNavigate } from "react-router-dom";
 import { logAction } from "../utils/analytics";
@@ -14,6 +14,34 @@ function ProtectedContent() {
     const [loadingInstitutions, setLoadingInstitutions] = useState(false);
     const [error, setError] = useState(null);
     const navigate = useNavigate();
+    const imagingFrameRef = useRef(null);
+
+    // The iframe requests an identity token only from the authenticated parent.
+    useEffect(() => {
+        const onImagingMessage = async (event) => {
+            if (event.origin !== 'https://secure.haske.online' ||
+                event.source !== imagingFrameRef.current?.contentWindow ||
+                event.data?.type !== 'HASKE_IMAGING_READY' ||
+                typeof event.data?.nonce !== 'string' ||
+                !/^[a-f0-9]{32}$/.test(event.data.nonce) ||
+                !isVerified) return;
+            try {
+                const user = auth.currentUser;
+                if (!user) return;
+                const token = await user.getIdToken();
+                if (event.source !== imagingFrameRef.current?.contentWindow) return;
+                event.source.postMessage({
+                    type: 'HASKE_IMAGING_TOKEN',
+                    nonce: event.data.nonce,
+                    token
+                }, 'https://secure.haske.online');
+            } catch (error) {
+                console.error('Imaging authentication failed', error);
+            }
+        };
+        window.addEventListener('message', onImagingMessage);
+        return () => window.removeEventListener('message', onImagingMessage);
+    }, [isVerified]);
 
     useEffect(() => {
         const user = auth.currentUser;
@@ -175,6 +203,7 @@ function ProtectedContent() {
     return (
         <div className="protected-container">
             <iframe 
+                ref={imagingFrameRef}
                 src={iframeSrc} 
                 title="Haske" 
                 className="protected-iframe"
