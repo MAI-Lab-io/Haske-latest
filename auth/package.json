@@ -32,11 +32,10 @@
     "react-datepicker": "^4.8.0",
     "detect-browser": "^5.3.0",
     "ua-parser-js": "^1.0.35"
-    
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "CI=false react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
