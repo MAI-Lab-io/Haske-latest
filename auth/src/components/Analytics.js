@@ -1,3 +1,4 @@
+import { auth } from "../firebaseConfig";
 import React, { useEffect, useState } from "react";
 import { 
   Table, TableBody, TableCell, TableHead, TableRow, 
@@ -52,6 +53,7 @@ const Analytics = ({ darkMode }) => {
     stats: {}
   });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [startDate, setStartDate] = useState(null);
@@ -68,18 +70,181 @@ const Analytics = ({ darkMode }) => {
 
   const fetchAnalytics = async () => {
     setLoading(true);
-    try {
-      let url = `https://api.haske.online/api/analytics/logs?`;
-      if (search) url += `&email=${encodeURIComponent(search)}`;
-      if (actionFilter) url += `&action=${encodeURIComponent(actionFilter)}`;
-      if (startDate) url += `&startDate=${startDate.toISOString()}`;
-      if (endDate) url += `&endDate=${endDate.toISOString()}`;
+    setError("");
 
-      const response = await fetch(url);
+    try {
+      await auth.authStateReady();
+
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        throw new Error("Please sign in again.");
+      }
+
+      const token = await currentUser.getIdToken();
+
+      const response = await fetch(
+        "https://api.haske.online/api/verification/logs",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json"
+          },
+          cache: "no-store"
+        }
+      );
+
+      if (response.status === 401) {
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+
+      if (response.status === 403) {
+        throw new Error("Administrator permission is required.");
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch analytics (HTTP ${response.status})`
+        );
+      }
+
       const result = await response.json();
-      setData(result);
-    } catch (error) {
-      console.error("Error fetching analytics:", error);
+
+      if (!Array.isArray(result.logs)) {
+        throw new Error("Invalid analytics response from server.");
+      }
+
+      // Filter existing activity records locally.
+      const filtered = result.logs.filter((log) => {
+        const email = String(log.email || "").toLowerCase();
+        const action = String(log.action || "").toLowerCase();
+
+        if (search && !email.includes(search.toLowerCase())) {
+          return false;
+        }
+
+        if (
+          actionFilter &&
+          String(log.action || "") !== actionFilter
+        ) {
+          return false;
+        }
+
+        const timestamp = new Date(log.timestamp);
+
+        if (startDate || endDate) {
+          if (Number.isNaN(timestamp.getTime())) return false;
+        }
+
+        if (startDate) {
+          const start = new Date(startDate);
+          start.setHours(0, 0, 0, 0);
+
+          if (timestamp < start) return false;
+        }
+
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+
+          if (timestamp > end) return false;
+        }
+
+        return true;
+      });
+
+      filtered.sort(
+        (a, b) =>
+          (Date.parse(b.timestamp) || 0) -
+          (Date.parse(a.timestamp) || 0)
+      );
+
+      // Calculate real activity statistics.
+      const uniqueEmails = new Set();
+      const actionCounts = {};
+      const devices = {};
+      const dailyActivity = {};
+
+      filtered.forEach((log) => {
+        const email = String(log.email || "").trim().toLowerCase();
+        const action = String(log.action || "Unknown");
+
+        if (email && email !== "unknown") {
+          uniqueEmails.add(email);
+        }
+
+        actionCounts[action] = (actionCounts[action] || 0) + 1;
+
+        // Device data is optional in the historical log format.
+        const device =
+          log.metadata?.deviceInfo?.os ||
+          log.os ||
+          log.deviceType;
+
+        if (device) {
+          devices[device] = (devices[device] || 0) + 1;
+        }
+
+        const timestamp = new Date(log.timestamp);
+
+        if (Number.isNaN(timestamp.getTime())) return;
+
+        const date = timestamp.toISOString().slice(0, 10);
+
+        if (!dailyActivity[date]) {
+          dailyActivity[date] = {
+            date,
+            signIns: 0,
+            signOuts: 0,
+            pageViews: 0
+          };
+        }
+
+        // Count only actions explicitly identifiable in logs.
+        if (/sign.?in|log.?in/i.test(action)) {
+          dailyActivity[date].signIns += 1;
+        } else if (/sign.?out|log.?out/i.test(action)) {
+          dailyActivity[date].signOuts += 1;
+        } else if (/page.?view/i.test(action)) {
+          dailyActivity[date].pageViews += 1;
+        }
+      });
+
+      const rankedActions = Object.entries(actionCounts).sort(
+        (a, b) => b[1] - a[1]
+      );
+
+      const rankedDevices = Object.entries(devices).sort(
+        (a, b) => b[1] - a[1]
+      );
+
+      const chartData = Object.values(dailyActivity).sort(
+        (a, b) => a.date.localeCompare(b.date)
+      );
+
+      setData({
+        logs: filtered,
+        chartData,
+        stats: {
+          uniqueUsers: uniqueEmails.size,
+          totalLogs: filtered.length,
+          mostCommonAction: rankedActions[0] || null,
+          deviceStats: rankedDevices,
+          actionCounts
+        }
+      });
+
+    } catch (err) {
+      console.error("Error fetching analytics:", err.message);
+      setError(err.message);
+
+      setData({
+        logs: [],
+        chartData: [],
+        stats: {}
+      });
+
     } finally {
       setLoading(false);
     }
@@ -131,6 +296,21 @@ const Analytics = ({ darkMode }) => {
       <Typography variant="h4" sx={{ mb: 3, fontWeight: "bold", color: "#dd841a" }}>
         User Analytics Dashboard
       </Typography>
+
+      {error && (
+        <Typography
+          role="alert"
+          sx={{
+            mb: 2,
+            p: 2,
+            color: "#991b1b",
+            backgroundColor: "#fee2e2",
+            borderRadius: 1
+          }}
+        >
+          {error}
+        </Typography>
+      )}
 
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -358,7 +538,7 @@ const Analytics = ({ darkMode }) => {
                     {log.metadata?.deviceInfo?.browser || log.browser || 'Unknown'}
                   </TableCell>
                   <TableCell sx={{ color: textColor }}>
-                    {log.metadata?.deviceInfo?.os || log.os || 'Unknown'} ({log.deviceType || 'desktop'})
+                    {log.metadata?.deviceInfo?.os || log.os || 'Unknown'} ({log.deviceType || 'Unknown'})
                   </TableCell>
                 </TableRow>
               ))
