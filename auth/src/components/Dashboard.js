@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { auth } from "../firebaseConfig";
 import { 
   Box, 
   Grid, 
@@ -56,14 +57,43 @@ useEffect(() => {
       setLoading(true);
       setError(null);
       
+      const user = auth.currentUser;
+
+      if (!user) {
+        throw new Error("Administrator session not available. Please sign in again.");
+      }
+
+      const token = await user.getIdToken();
+
       const [statsResponse, dicomResponse, analyticsResponse, institutionsResponse] = await Promise.all([
-        fetch("https://api.haske.online/api/verification/stats"),
+        fetch("https://api.haske.online/api/verification/stats", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json"
+          }
+        }),
         fetch("https://api.haske.online/api/dicom-stats"),
         fetch(`https://api.haske.online/api/analytics/logs?timeRange=${timeRange}`),
         fetch("https://api.haske.online/api/institutions?page=1&pageSize=100") // Fetch all institutions
       ]);
 
-      if (!statsResponse.ok) throw new Error("Failed to fetch user stats");
+      
+      if (statsResponse.status === 401) {
+        throw new Error(
+          "Your administrator session has expired or is invalid. Please sign in again."
+        );
+      }
+
+      if (statsResponse.status === 403) {
+        throw new Error(
+          "Your account does not have permission to access administrator statistics."
+        );
+      }
+
+      if (!statsResponse.ok) {
+        throw new Error("Failed to fetch user stats");
+      }
+
       if (!dicomResponse.ok) throw new Error("Failed to fetch DICOM stats");
       if (!institutionsResponse.ok) throw new Error("Failed to fetch institutions");
 
