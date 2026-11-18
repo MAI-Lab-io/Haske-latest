@@ -54,39 +54,95 @@ function ProtectedContent() {
         }
     }, [isVerified, isAdmin, isSuperAdmin, institutionName]);
 
+    // HASKE_ACCOUNT_STATUS_ROUTING_V1
     useEffect(() => {
-        const user = auth.currentUser;
-        if (user) {
-            logAction('Verification Check Started', {}, user);
-            
-            fetch(`https://api.haske.online/api/verification/check-verification?email=${user.email}`)
-                .then((response) => response.json())
-                .then((data) => {
-                    if (data.isVerified) {
-                        setIsVerified(true);
-                        setInstitutionName(data.institutionName || "");
-                        setIsAdmin(data.isAdmin || false);
-                        setIsSuperAdmin(data.isSuperAdmin || false);
-                        logAction('User Verified', {
-                            institution: data.institutionName,
-                            isAdmin: data.isAdmin,
-                            isSuperAdmin: data.isSuperAdmin
-                        }, user);
-                    } else {
-                        setIsVerified(false);
-                        logAction('User Not Verified', {}, user);
+        let cancelled = false;
+        const controller = new AbortController();
+
+        const checkAccount = async () => {
+            try {
+                await auth.authStateReady();
+                if (cancelled) return;
+
+                const user = auth.currentUser;
+
+                if (!user?.email) {
+                    navigate("/signin", { replace: true });
+                    return;
+                }
+
+                logAction('Verification Check Started', {}, user);
+
+                const response = await fetch(
+                    `https://api.haske.online/api/verification/check-verification?email=${encodeURIComponent(user.email)}`,
+                    {
+                        signal: controller.signal,
+                        cache: "no-store"
                     }
-                })
-                .catch((error) => {
-                    console.error("Error checking verification:", error);
+                );
+
+                if (cancelled) return;
+
+                if (response.status === 404) {
+                    navigate("/verification", {
+                        replace: true,
+                        state: { email: user.email }
+                    });
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error(
+                        `Account verification failed (HTTP ${response.status})`
+                    );
+                }
+
+                const data = await response.json();
+                if (cancelled) return;
+
+                if (data.isDeactivated) {
+                    setError(
+                        "Your Haske account has been deactivated. Contact an administrator."
+                    );
                     setIsVerified(false);
-                    logAction('Verification Check Failed', { error: error.message }, user);
-                });
-        } else {
-            setIsVerified(false);
-            logAction('No User Found - Redirecting', {}, null);
-        }
-    }, []);
+                    return;
+                }
+
+                if (!data.isVerified) {
+                    navigate("/verify-waiting", { replace: true });
+                    return;
+                }
+
+                setInstitutionName(data.institutionName || "");
+                setIsAdmin(Boolean(data.isAdmin));
+                setIsSuperAdmin(Boolean(data.isSuperAdmin));
+                setIsVerified(true);
+
+                logAction('User Verified', {
+                    institution: data.institutionName,
+                    isAdmin: Boolean(data.isAdmin),
+                    isSuperAdmin: Boolean(data.isSuperAdmin)
+                }, user);
+
+            } catch (error) {
+                if (cancelled || error.name === "AbortError") return;
+
+                console.error("Haske account verification failed:", error);
+
+                setError(
+                    "We could not verify your account status. Please try again."
+                );
+                setIsVerified(false);
+            }
+        };
+
+        checkAccount();
+
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [navigate]);
 
     useEffect(() => {
         if (isVerified && isSuperAdmin) {
@@ -186,10 +242,14 @@ function ProtectedContent() {
     }
     
     if (isVerified === false) {
-        const user = auth.currentUser;
-        logAction('Redirected to Register - Not Verified', {}, user);
-        navigate("/register");
-        return null;
+        return (
+            <div className="protected-container" role="alert">
+                <p>
+                    {error ||
+                        "Your Haske account is not authorised for imaging access."}
+                </p>
+            </div>
+        );
     }
 
     const formattedInstitutionName = institutionName ? encodeURIComponent(institutionName) : "";

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { auth } from "../firebaseConfig";
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import "./Register.css"; // Import CSS file for styles
@@ -41,7 +41,10 @@ function Register() {
 
     try {
       // Create user on Firebase
-      await createUserWithEmailAndPassword(auth, email, password);
+      const credential = await createUserWithEmailAndPassword(
+        auth, email, password
+      );
+      await sendEmailVerification(credential.user);
       setLoading(false);
       alert("Registration successful! Please complete your profile.");
 
