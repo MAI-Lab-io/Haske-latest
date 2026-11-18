@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { auth } from "../firebaseConfig";
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
+import { sendHaskeVerificationEmail } from "../utils/sendHaskeVerificationEmail";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import "./Register.css"; // Import CSS file for styles
@@ -44,9 +45,18 @@ function Register() {
       const credential = await createUserWithEmailAndPassword(
         auth, email, password
       );
-      await sendEmailVerification(credential.user);
+      try {
+        await sendHaskeVerificationEmail(credential.user);
+      } catch (mailError) {
+        console.error("Haske verification email failed:", mailError);
+        alert(
+          "Your account was created, but the verification email " +
+          "could not be sent. Use Resend Verification Email " +
+          "on the profile setup page."
+        );
+      }
       setLoading(false);
-      alert("Registration successful! Please complete your profile.");
+      alert("Account created! We've sent a verification link to your email. Please verify your address and complete your profile.");
 
       // Redirect to verify-waiting page
       navigate("/verification", { state: { email } });

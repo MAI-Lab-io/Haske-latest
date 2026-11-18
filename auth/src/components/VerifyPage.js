@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { auth } from "../firebaseConfig";
+import { sendHaskeVerificationEmail } from "../utils/sendHaskeVerificationEmail";
 import {
-  onAuthStateChanged,
-  sendEmailVerification
+  onAuthStateChanged
 } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import "./VerifyPage.css";
@@ -91,8 +91,8 @@ const VerifyPage = () => {
 
       setNotification(
         user.emailVerified
-          ? "Email verified successfully. You can now submit your profile."
-          : "Email not yet verified. Check your inbox and open the Firebase verification link."
+          ? "Your email address has been verified. You can now complete your profile."
+          : "Your email has not been verified yet. Please open the verification link sent to your email address."
       );
     } catch (error) {
       setNotification(error.message || "Unable to check verification.");
@@ -120,9 +120,9 @@ const VerifyPage = () => {
         return;
       }
 
-      await sendEmailVerification(user);
+      await sendHaskeVerificationEmail(user);
       setNotification(
-        "Verification email requested. Check your inbox and spam folder."
+        "A verification email has been sent. Please check your inbox or spam folder."
       );
     } catch (error) {
       setNotification(
@@ -154,7 +154,7 @@ const VerifyPage = () => {
 
       if (!currentUser.emailVerified) {
         throw new Error(
-          "Please verify your email using the Firebase verification message, then try again."
+          "Please verify your email address using the link sent to your inbox, then try again."
         );
       }
 
@@ -227,8 +227,8 @@ const VerifyPage = () => {
 
           <div className="verify-notification">
             {emailVerified
-              ? "Your Firebase email is verified."
-              : "Verify your Firebase email before submitting your profile."}
+              ? "Your email address has been verified."
+              : "Verify your email address before submitting your profile."}
           </div>
 
           <div style={{
