@@ -30,36 +30,93 @@ const VerifyPage = () => {
 
   const roles = ["Radiologist", "Radiographer", "Front Desk", "IT Specialist"];
 
-  // Fetch institutions from backend
+  // Load institutions from the current Haske backend.
+  // Never use a hardcoded fallback for access-related registration.
   useEffect(() => {
+    let cancelled = false;
+
     const fetchInstitutions = async () => {
+      setIsLoading(true);
+      setError(null);
+
       try {
-        const response = await fetch("https://api.haske.online/api/institutions");
+        const response = await fetch(
+          "https://api.haske.online/api/institutions?source=manual&pageSize=1000",
+          {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            cache: "no-store"
+          }
+        );
+
         if (!response.ok) {
-          throw new Error("Failed to fetch institutions");
+          throw new Error(
+            `Institution service returned HTTP ${response.status}`
+          );
         }
+
         const data = await response.json();
-        setInstitutions(data.map(inst => inst.name));
+
+        // Support a raw array or commonly wrapped API responses.
+        const list = Array.isArray(data)
+          ? data
+          : [
+              data?.institutions,
+              data?.data,
+              data?.results,
+              data?.data?.institutions
+            ].find(Array.isArray);
+
+        if (!Array.isArray(list)) {
+          throw new Error("Unexpected institution response format.");
+        }
+
+        const names = [...new Set(
+          list.map(item => {
+            if (typeof item === "string") return item.trim();
+
+            return String(
+              item?.name ??
+              item?.institution_name ??
+              item?.institutionName ??
+              ""
+            ).trim();
+          }).filter(Boolean)
+        )];
+
+        if (names.length === 0) {
+          throw new Error("No registered institutions are available.");
+        }
+
+        if (!cancelled) {
+          setInstitutions(names);
+          setError(null);
+        }
+
       } catch (err) {
-        console.error("Error fetching institutions:", err);
-        setError(err.message);
-        // Fallback to default institutions if API fails
-        setInstitutions([
-          "CRESTVIEW RADIOLOGY LTD",
-          "National Library of Medicine",
-          "BTHDC LASUTH",
-          "GEM DIAGNOSTIC CENTER",
-          "OOUTH",
-        ]);
+        console.error("Institution loading failed:", err);
+
+        if (!cancelled) {
+          setInstitutions([]);
+          setError(
+            "Unable to load registered institutions. " +
+            "Please refresh the page or contact Haske support."
+          );
+        }
+
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     fetchInstitutions();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Use the signed-in Firebase identity as the email source.
+    // Use the signed-in Firebase identity as the email source.
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -221,7 +278,7 @@ const VerifyPage = () => {
           
           {error && (
             <div className="verify-notification error">
-              Warning: Couldn't fetch institutions. Using default list.
+{error}
             </div>
           )}
 
@@ -296,8 +353,11 @@ const VerifyPage = () => {
                 onChange={handleChange}
                 required
                 className="verify-select"
+                disabled={!!error || institutions.length === 0}
               >
-                <option value="">Select Institution Name</option>
+                <option value="">
+                  {error ? "Institutions unavailable" : "Select Institution Name"}
+                </option>
                 {institutions.map((inst, index) => (
                   <option key={index} value={inst}>
                     {inst}
@@ -354,7 +414,14 @@ const VerifyPage = () => {
             <button
               type="submit"
               className="verify-button"
-              disabled={!emailVerified || verificationLoading}
+              disabled={
+                !emailVerified ||
+                verificationLoading ||
+                isLoading ||
+                !!error ||
+                !formData.institution_name ||
+                !institutions.includes(formData.institution_name)
+              }
             >
               Finish setting up my account
             </button>
